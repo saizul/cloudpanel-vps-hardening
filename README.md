@@ -1,5 +1,7 @@
 # cloudpanel-vps-hardening
 
+[![CI](https://github.com/saizul/cloudpanel-vps-hardening/actions/workflows/ci.yml/badge.svg)](https://github.com/saizul/cloudpanel-vps-hardening/actions/workflows/ci.yml) ![Bash](https://img.shields.io/badge/bash-5-4EAA25?logo=gnubash&logoColor=white) ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white)
+
 Small, readable Bash scripts to harden and maintain an Ubuntu 22.04 / 24.04 VPS. They work on a plain server and on one running [CloudPanel](https://www.cloudpanel.io/) (which adds a panel on port 8443 and manages Nginx, PHP-FPM and MySQL/MariaDB for you).
 
 By [Saizul Amin](https://saizul.com). MIT licensed.
