@@ -45,6 +45,22 @@ Run a subset: `./harden.sh --only updates,swap` or `./harden.sh ssh ufw`.
 
 Lists `php*-fpm` services with state, support end dates (table inside the script; verify against php.net), warns for EOL versions, and shows pending `php*` package upgrades, flagging security ones. Read-only apart from `apt-get update`.
 
+## ssl-expiry-check.sh
+
+Connects to each host with `openssl s_client` (SNI aware) and reads the certificate it really serves, so a renewed certificate that Nginx never reloaded is caught too. Warns when fewer than `SSL_WARN_DAYS` (default 21) remain, errors on expired certificates and on hosts it cannot read, and exits `1` if anything needs attention (`0` otherwise), which suits cron and monitoring. It needs no root and changes nothing.
+
+```bash
+./ssl-expiry-check.sh example.com www.example.com mail.example.com:465   # ad hoc; HOST[:PORT], default port 443
+./ssl-expiry-check.sh --days 30                                          # SSL_DOMAINS from config.env
+./ssl-expiry-check.sh --dry-run example.com                              # print the openssl commands only
+```
+
+Settings in `config.env`: `SSL_DOMAINS` (space separated), `SSL_WARN_DAYS`, `SSL_TIMEOUT` (seconds per host, uses `timeout` when installed). With `--quiet` only warnings and errors are printed, so a cron job mails you (or a log shipper alerts) only when something needs attention:
+
+```
+5 8 * * * /opt/cloudpanel-vps-hardening/ssl-expiry-check.sh --quiet --config /opt/cloudpanel-vps-hardening/config.env
+```
+
 ## backup.sh
 
 Creates `BACKUP_DIR/<timestamp>/` containing `db-<name>.sql.gz` per database (`--single-transaction`, routines, events) and `files-<dir>.tar.gz` per directory under `SITES_DIR` (CloudPanel keeps sites under `/home/<site-user>`). Deletes sets older than `BACKUP_RETENTION_DAYS`, then optionally runs `rclone copy` to `RCLONE_REMOTE`. Put DB credentials in `/root/.my.cnf` (mode 600). Options: `--skip-db`, `--skip-files`. Test a restore regularly; a backup you have not restored is a hope, not a backup. Example cron:

@@ -16,3 +16,4 @@ jobs:
         run: |
           cp config.env.example config.env
           sudo ./php-update-check.sh --dry-run || true
+          ./ssl-expiry-check.sh --dry-run example.com:443
