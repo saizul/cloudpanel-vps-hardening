@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. Format based on Keep a Changelog.
 
+## [Unreleased]
+
+### Added
+- `ssl-expiry-check.sh`: reads the certificate each listed host serves and warns below `SSL_WARN_DAYS`; supports `HOST[:PORT]`, `--days`, `--dry-run`, and exits 1 on problems.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added
