@@ -12,7 +12,8 @@ Every script: `set -euo pipefail`, requires root (except `--dry-run`), supports 
 
 ```bash
 git clone <this repo> && cd cloudpanel-vps-hardening
-cp config.env.example config.env && nano config.env
+cp config.env.example config.env && chmod 600 config.env && nano config.env
+./harden.sh --check-config          # validate settings (no root needed)
 sudo ./harden.sh --dry-run          # read the plan first
 sudo ./harden.sh                    # apply all steps
 sudo ./harden.sh --only ufw,fail2ban
@@ -25,6 +26,31 @@ sudo ./harden.sh --only ufw,fail2ban
 - If you change `SSH_PORT`, also allow it in your hosting provider's firewall. On Ubuntu 24.04 SSH is socket-activated, so the port comes from `ssh.socket`; the script warns and prints the fix.
 - With CloudPanel, never close the panel port you use. Set `UFW_PANEL_PORT=8443` and `UFW_PANEL_ALLOW` to your IPs. If the allow-list is empty the port is opened to everyone (a warning is shown). CloudPanel may also manage its own firewall rules in the UI; check for conflicts.
 - Test on a throwaway VPS or snapshot first. No warranty, see LICENSE.
+
+## Config validation
+
+`harden.sh`, `backup.sh` and `redis-setup.sh` validate `config.env` and the step list before they change anything, report every problem at once, and exit `1` without touching the server. Run `--check-config` to do only that (no root needed), for example after editing the file or in CI:
+
+```bash
+./harden.sh --check-config && ./backup.sh --check-config && ./redis-setup.sh --check-config
+```
+
+What is checked:
+
+| Setting | Rule |
+|---------|------|
+| `ADMIN_USER` | lowercase account name (`[a-z_][a-z0-9_-]*`, max 32); prevents a broken `/etc/sudoers.d` drop-in |
+| `ADMIN_SSH_PUBKEY` | one public key line (`ssh-ed25519`, `ssh-rsa`, `ecdsa-*`, `sk-*`); rejects pasted private keys and multi-line values; required when `ADMIN_USER` is set and the `user` step runs |
+| `SSH_PORT`, `UFW_PANEL_PORT` | TCP port 1-65535; the two must differ |
+| `SSH_ALLOW_USERS` | `USER` or `USER@HOST` entries; must include `ADMIN_USER` when both are set (otherwise that account is locked out) |
+| `UFW_PANEL_ALLOW` | IPv4/IPv6 addresses or CIDRs |
+| `F2B_MAXRETRY`, `F2B_FINDTIME`, `F2B_BANTIME` | whole number; fail2ban times such as `600`, `10m`, `1h30m`, `-1` |
+| `SWAP_SIZE`, `TIMEZONE` | `2G`/`512M` style size; a zone that exists in `/usr/share/zoneinfo` |
+| `BACKUP_DIR`, `SITES_DIR` | absolute, not `/`, no `..` (retention runs `rm -rf` under `BACKUP_DIR`) |
+| `BACKUP_RETENTION_DAYS`, `RCLONE_REMOTE` | whole number; `REMOTE:PATH` or an absolute path |
+| `REDIS_MAXMEMORY`, `REDIS_POLICY`, `REDIS_PASSWORD` | `256mb` style size; a valid `maxmemory-policy`; one token without spaces |
+
+Unknown `harden.sh` steps are rejected up front too, so `--only sysctl,firewall` no longer runs `sysctl` before failing. Because `config.env` is sourced as root, every script refuses to load it when it is writable by group or others (`chmod 600 config.env`).
 
 ## harden.sh steps
 
@@ -75,11 +101,16 @@ Installs `redis-server`, binds it to localhost, sets `maxmemory` and eviction po
 
 ## Development
 
+Tests use [bats-core](https://github.com/bats-core/bats-core) and never need root or change the system: they call the `lib/common.sh` helpers directly and run the scripts with `--check-config` / `--dry-run` against a temporary config. They also run on macOS's stock Bash 3.2.
+
 ```bash
-for f in *.sh lib/common.sh; do bash -n "$f"; done
-shellcheck *.sh lib/common.sh     # if installed
-./harden.sh --dry-run
+make check                        # = make lint test
+make lint                         # bash -n + shellcheck on scripts and tests
+make test                         # bats tests
+bats tests/harden.bats            # one file
 ```
+
+Install the tools with `apt-get install bats shellcheck` (Ubuntu), `brew install bats-core shellcheck` (macOS), or without a package manager: `npm install bats` and `pip install shellcheck-py` (both ignored by `.gitignore`), then `make check BATS=node_modules/.bin/bats`. CI runs the same lint and test steps on every push and pull request.
 
 ## License
 

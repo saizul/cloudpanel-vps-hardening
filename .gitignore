@@ -1,0 +1,7 @@
+# Local settings (copy of config.env.example; may hold keys and passwords)
+config.env
+
+# Local tool installs (bats via npm, shellcheck-py venv)
+node_modules/
+.venv/
+venv/
