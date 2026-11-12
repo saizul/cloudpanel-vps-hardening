@@ -6,10 +6,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 
-usage() { echo "Usage: sudo $0 [--dry-run] [--config FILE]"; }
+usage() { echo "Usage: sudo $0 [--dry-run] [--check-config] [--config FILE]"; }
+CHECK_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
+    --check-config) CHECK_ONLY=1; shift ;;
     --config) CONFIG_FILE="${2:?}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown option: $1" ;;
@@ -17,6 +19,14 @@ while [ $# -gt 0 ]; do
 done
 load_config "$HERE"
 : "${REDIS_MAXMEMORY:=256mb}" "${REDIS_POLICY:=allkeys-lru}" "${REDIS_PASSWORD:=}"
+check_var REDIS_MAXMEMORY is_redis_memory "a size such as 256mb or 1gb"
+check_var REDIS_POLICY is_redis_policy "a maxmemory-policy such as allkeys-lru or volatile-lru"
+# The password is written verbatim after 'requirepass'; spaces or a newline would break redis.conf.
+if [ -n "$REDIS_PASSWORD" ] && ! is_single_token "$REDIS_PASSWORD"; then
+  config_error "REDIS_PASSWORD must be a single line without spaces"
+fi
+finish_config_check
+[ "$CHECK_ONLY" -eq 0 ] || exit 0
 require_root
 check_ubuntu
 

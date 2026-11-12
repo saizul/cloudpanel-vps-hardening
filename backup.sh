@@ -6,12 +6,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 
-usage() { echo "Usage: sudo $0 [--dry-run] [--config FILE] [--skip-db] [--skip-files]"; }
-SKIP_DB=0; SKIP_FILES=0
+usage() { echo "Usage: sudo $0 [--dry-run] [--check-config] [--config FILE] [--skip-db] [--skip-files]"; }
+SKIP_DB=0; SKIP_FILES=0; CHECK_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --config) CONFIG_FILE="${2:?}"; shift 2 ;;
+    --check-config) CHECK_ONLY=1; shift ;;
     --skip-db) SKIP_DB=1; shift ;;
     --skip-files) SKIP_FILES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -21,9 +22,20 @@ done
 load_config "$HERE"
 : "${BACKUP_DIR:=/var/backups/vps}" "${BACKUP_RETENTION_DAYS:=14}" "${SITES_DIR:=/home}"
 : "${DB_EXCLUDE:=information_schema performance_schema sys mysql}" "${RCLONE_REMOTE:=}"
-require_root
+# BACKUP_DIR is pruned with rm -rf, so it must be a real absolute directory, never / or relative.
+check_var BACKUP_DIR is_safe_abs_dir "an absolute directory other than /, e.g. /var/backups/vps"
+check_var BACKUP_RETENTION_DAYS is_uint "a whole number of days"
+check_var SITES_DIR is_safe_abs_dir "an absolute directory, e.g. /home"
+if [ -n "$RCLONE_REMOTE" ] && ! [[ "$RCLONE_REMOTE" =~ ^([A-Za-z0-9_.-]+:|/) ]]; then
+  config_error "RCLONE_REMOTE='$RCLONE_REMOTE' is invalid; expected REMOTE:PATH (e.g. b2:my-bucket/vps) or an absolute path"
+fi
+case "${BACKUP_DIR%/}/" in
+  "${SITES_DIR%/}"/*) warn "BACKUP_DIR is inside SITES_DIR: backups would be tarred into the next backup" ;;
+esac
+finish_config_check
+[ "$CHECK_ONLY" -eq 0 ] || exit 0
 
-case "$BACKUP_RETENTION_DAYS" in ''|*[!0-9]*) die "BACKUP_RETENTION_DAYS must be a number" ;; esac
+require_root
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 dest="$BACKUP_DIR/$stamp"

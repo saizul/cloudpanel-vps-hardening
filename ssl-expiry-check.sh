@@ -41,6 +41,7 @@ SSL_WARN_DAYS="${cli_days:-$SSL_WARN_DAYS}"
 [ -n "$cli_domains" ] && SSL_DOMAINS="$cli_domains"
 
 case "$SSL_WARN_DAYS" in ''|*[!0-9]*) die "--days / SSL_WARN_DAYS must be a whole number, got '$SSL_WARN_DAYS'" ;; esac
+is_uint "$SSL_TIMEOUT" && [ "$SSL_TIMEOUT" -gt 0 ] || die "SSL_TIMEOUT must be a positive whole number of seconds, got '$SSL_TIMEOUT'"
 [ -n "${SSL_DOMAINS// /}" ] || die "no domains: pass HOST arguments or set SSL_DOMAINS in config.env"
 command -v openssl >/dev/null 2>&1 || [ "$DRY_RUN" -eq 1 ] || die "openssl is required"
 

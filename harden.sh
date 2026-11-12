@@ -8,6 +8,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ALL_STEPS="updates user ssh ufw fail2ban sysctl swap time"
 STEPS=""
+CHECK_ONLY=0
 
 usage() {
   cat <<USAGE
@@ -18,6 +19,7 @@ Options:
   --config FILE   config file (default: ./config.env if present)
   --only STEPS    comma-separated steps to run
   --dry-run       print commands, change nothing
+  --check-config  validate config.env and the step list, then exit (no root needed)
   -h, --help      show help
 
 IMPORTANT: keep a second SSH session open while running the 'ssh' and 'ufw' steps.
@@ -29,6 +31,7 @@ while [ $# -gt 0 ]; do
     --config) CONFIG_FILE="${2:?--config needs a file}"; shift 2 ;;
     --only)   STEPS="${2//,/ }"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --check-config) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) usage >&2; die "unknown option: $1" ;;
     *) STEPS="$STEPS $1"; shift ;;
@@ -40,12 +43,50 @@ load_config "$HERE"
 : "${UFW_PANEL_PORT:=}" "${UFW_PANEL_ALLOW:=}" "${F2B_MAXRETRY:=5}" "${F2B_FINDTIME:=10m}"
 : "${F2B_BANTIME:=1h}" "${SWAP_SIZE:=2G}" "${TIMEZONE:=UTC}"
 
-require_root
-check_ubuntu
-
 if [ -z "${STEPS// /}" ]; then
   STEPS="$ALL_STEPS"
 fi
+
+# Validate everything before the first change: a typo must not leave the server half hardened
+# (e.g. ufw enabled but the SSH port wrong) or write a sudoers/sshd file that breaks login.
+validate_config() {
+  local s
+  for s in $STEPS; do
+    case " $ALL_STEPS " in *" $s "*) ;; *) config_error "unknown step: $s (valid: $ALL_STEPS)" ;; esac
+  done
+  check_var ADMIN_USER is_unix_user "a lowercase account name, e.g. deploy" optional
+  check_var ADMIN_SSH_PUBKEY is_ssh_pubkey "one public key line, e.g. 'ssh-ed25519 AAAA... you@laptop'" optional
+  if [ -n "$ADMIN_USER" ] && [ -z "$ADMIN_SSH_PUBKEY" ]; then
+    case " $STEPS " in *" user "*) config_error "ADMIN_SSH_PUBKEY is required when ADMIN_USER is set (key-only login)" ;; esac
+  fi
+  check_var SSH_PORT is_port "a TCP port 1-65535"
+  check_list SSH_ALLOW_USERS is_ssh_allow_entry "USER or USER@HOST"
+  if [ -n "$ADMIN_USER" ] && [ -n "$SSH_ALLOW_USERS" ]; then
+    case " $SSH_ALLOW_USERS " in
+      *" $ADMIN_USER "*|*" $ADMIN_USER@"*) ;;
+      *) config_error "SSH_ALLOW_USERS does not include ADMIN_USER '$ADMIN_USER'; that account would be locked out" ;;
+    esac
+  fi
+  check_var UFW_PANEL_PORT is_port "a TCP port 1-65535, e.g. 8443" optional
+  if [ -n "$UFW_PANEL_PORT" ] && [ "$UFW_PANEL_PORT" = "$SSH_PORT" ]; then
+    config_error "UFW_PANEL_PORT and SSH_PORT are both $SSH_PORT"
+  fi
+  check_list UFW_PANEL_ALLOW is_ip_or_cidr "IPv4/IPv6 addresses or CIDRs, e.g. 203.0.113.10 198.51.100.0/24"
+  if [ -n "$UFW_PANEL_ALLOW" ] && [ -z "$UFW_PANEL_PORT" ]; then
+    warn "UFW_PANEL_ALLOW is set but UFW_PANEL_PORT is empty; the allow-list is ignored"
+  fi
+  check_var F2B_MAXRETRY is_uint "a whole number"
+  check_var F2B_FINDTIME is_f2b_time "a fail2ban time such as 600, 10m, 1h"
+  check_var F2B_BANTIME is_f2b_time "a fail2ban time such as 1h, 1d, or -1 for permanent"
+  check_var SWAP_SIZE is_size "a size such as 2G or 512M"
+  check_var TIMEZONE is_timezone "a zone from 'timedatectl list-timezones', e.g. UTC or Europe/London"
+  finish_config_check
+}
+validate_config
+[ "$CHECK_ONLY" -eq 0 ] || exit 0
+
+require_root
+check_ubuntu
 
 step_updates() {
   log "== updates: apt upgrade + unattended-upgrades"
@@ -234,7 +275,7 @@ step_time() {
 for s in $STEPS; do
   case "$s" in
     updates|user|ssh|ufw|fail2ban|sysctl|swap|time) "step_$s" ;;
-    *) die "unknown step: $s (valid: $ALL_STEPS)" ;;
+    *) die "unknown step: $s (valid: $ALL_STEPS)" ;;  # unreachable after validate_config
   esac
 done
 log "done."
