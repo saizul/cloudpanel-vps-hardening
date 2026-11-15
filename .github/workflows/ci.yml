@@ -18,6 +18,8 @@ jobs:
           ./harden.sh --check-config
           ./backup.sh --check-config
           ./redis-setup.sh --check-config
+          ./audit.sh --check-config
+          sudo ./audit.sh || true
           sudo ./php-update-check.sh --dry-run || true
           ./ssl-expiry-check.sh --dry-run example.com:443
   test:

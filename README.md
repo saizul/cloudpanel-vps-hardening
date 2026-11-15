@@ -17,6 +17,7 @@ cp config.env.example config.env && chmod 600 config.env && nano config.env
 sudo ./harden.sh --dry-run          # read the plan first
 sudo ./harden.sh                    # apply all steps
 sudo ./harden.sh --only ufw,fail2ban
+sudo ./audit.sh                     # verify the result (read-only)
 ```
 
 ## Read this before you run it
@@ -67,6 +68,40 @@ Unknown `harden.sh` steps are rejected up front too, so `--only sysctl,firewall`
 
 Run a subset: `./harden.sh --only updates,swap` or `./harden.sh ssh ufw`.
 
+## audit.sh
+
+Checks that the hardening is really in effect, which catches drift: a CloudPanel or package update that re-enabled password login in another sshd drop-in, a firewall that was disabled while debugging, a stopped fail2ban, a sysctl that a provider image overrides. It reads the live state, compares it with `config.env`, prints one line per check and changes nothing.
+
+```bash
+sudo ./audit.sh                     # all checks
+sudo ./audit.sh --only ssh,ufw      # a subset
+sudo ./audit.sh --quiet --strict    # cron: silent when clean, exit 1 on any WARN or FAIL
+```
+
+```
+PASS  ssh       permitrootlogin no
+FAIL  ssh       passwordauthentication is 'yes', expected 'no'
+PASS  ufw       firewall active
+WARN  ufw       panel port 8443 is open to Anywhere (set UFW_PANEL_ALLOW)
+```
+
+| Check | FAIL when | WARN when |
+|-------|-----------|-----------|
+| `ssh` | `sshd -T` (the effective config after all drop-ins) allows root or password/keyboard-interactive login, empty passwords, no pubkey auth; port is not `SSH_PORT`; `AllowUsers` misses an `SSH_ALLOW_USERS` entry; config does not parse | `MaxAuthTries` above 3, X11 forwarding on |
+| `ufw` | not installed or inactive, incoming not denied by default, no rule for `SSH_PORT`, panel port open to Anywhere although `UFW_PANEL_ALLOW` is set | panel port open to Anywhere without an allow-list, or no panel rule |
+| `fail2ban` | not installed or the `sshd` jail is not running | |
+| `sysctl` | a kernel parameter from `harden.sh`'s `99-hardening.conf` has another live value | |
+| `updates` | unattended upgrades not enabled | `/var/run/reboot-required` exists |
+| `swap`, `time` | | no active swap; clock not NTP synchronised; timezone differs from `TIMEZONE` |
+| `accounts` | a UID 0 account other than root, an account with an empty password, `ADMIN_USER` missing | |
+| `redis` | (only when installed) bound to a non-loopback address or no `bind` at all | `protected-mode no` |
+
+Without root, checks that need it (`sshd -T`, ufw, fail2ban, `/etc/shadow`) are reported as `SKIP` instead of failing. Exit status is `0` when nothing failed and `1` otherwise (also on warnings with `--strict`), so it works in cron or a monitoring agent:
+
+```
+30 6 * * * /opt/cloudpanel-vps-hardening/audit.sh --quiet --config /opt/cloudpanel-vps-hardening/config.env
+```
+
 ## php-update-check.sh
 
 Lists `php*-fpm` services with state, support end dates (table inside the script; verify against php.net), warns for EOL versions, and shows pending `php*` package upgrades, flagging security ones. Read-only apart from `apt-get update`.
@@ -101,7 +136,7 @@ Installs `redis-server`, binds it to localhost, sets `maxmemory` and eviction po
 
 ## Development
 
-Tests use [bats-core](https://github.com/bats-core/bats-core) and never need root or change the system: they call the `lib/common.sh` helpers directly and run the scripts with `--check-config` / `--dry-run` against a temporary config. They also run on macOS's stock Bash 3.2.
+Tests use [bats-core](https://github.com/bats-core/bats-core) and never need root or change the system: they call the `lib/common.sh` helpers directly, run the scripts with `--check-config` / `--dry-run` against a temporary config, and run `audit.sh` against a fake server (`AUDIT_ROOT` file tree plus `AUDIT_FIXTURES` saved command outputs). They also run on macOS's stock Bash 3.2.
 
 ```bash
 make check                        # = make lint test
